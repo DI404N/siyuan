@@ -1,48 +1,45 @@
-FROM --platform=$BUILDPLATFORM node:21 AS node-build
+FROM node:21 AS NODE_BUILD
 
-ARG NPM_REGISTRY=
+WORKDIR /go/src/github.com/siyuan-note/siyuan/
+ADD . /go/src/github.com/siyuan-note/siyuan/
 
-WORKDIR /app
-ADD app/package.json app/pnpm* app/.npmrc .
+# RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' /etc/apt/sources.list.d/debian.sources && \
+#     sed -i 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security/|g' /etc/apt/sources.list.d/debian.sources
+    
+RUN cd app && \
+    npm config set registry https://registry.npmmirror.com && \
+    npm install -g pnpm && \
+    pnpm config set registry https://registry.npmmirror.com && \
+    pnpm install --silent && \
+    pnpm run build
 
-RUN <<EORUN
-#!/bin/bash -e
-corepack enable
-corepack install --global $(node -e 'console.log(require("./package.json").packageManager)')
-npm config set registry ${NPM_REGISTRY}
-pnpm install --silent
-EORUN
-
-ADD app/ .
-RUN <<EORUN
-#!/bin/bash -e
-pnpm run build
-mkdir /artifacts
-mv appearance stage guide changelogs /artifacts/
-EORUN
-
-FROM golang:1.25-alpine AS go-build
-
-RUN <<EORUN
-#!/bin/sh -e
-apk add --no-cache gcc musl-dev
-go env -w GO111MODULE=on
-go env -w CGO_ENABLED=1
-EORUN
-
-WORKDIR /kernel
-ADD kernel/go.* .
-RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg \
-    go mod download
-
-ADD kernel/ .
-RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg \
-    go build -tags fts5 -v -ldflags "-s -w"
+FROM golang:alpine AS GO_BUILD
+WORKDIR /go/src/github.com/siyuan-note/siyuan/
+COPY --from=NODE_BUILD /go/src/github.com/siyuan-note/siyuan/ /go/src/github.com/siyuan-note/siyuan/
+ENV GO111MODULE=on
+ENV CGO_ENABLED=1
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
+    apk add --no-cache gcc musl-dev && \
+    go env -w GOPROXY=https://goproxy.cn,direct && \
+    cd kernel && go build --tags fts5 -v -ldflags "-s -w" && \
+    mkdir /opt/siyuan/ && \
+    mv /go/src/github.com/siyuan-note/siyuan/app/appearance/ /opt/siyuan/ && \
+    mv /go/src/github.com/siyuan-note/siyuan/app/stage/ /opt/siyuan/ && \
+    mv /go/src/github.com/siyuan-note/siyuan/app/guide/ /opt/siyuan/ && \
+    mv /go/src/github.com/siyuan-note/siyuan/app/changelogs/ /opt/siyuan/ && \
+    mv /go/src/github.com/siyuan-note/siyuan/kernel/kernel /opt/siyuan/ && \
+    mv /go/src/github.com/siyuan-note/siyuan/kernel/entrypoint.sh /opt/siyuan/entrypoint.sh && \
+    find /opt/siyuan/ -name .git | xargs rm -rf
 
 FROM alpine:latest
 LABEL maintainer="Liang Ding<845765@qq.com>"
 
-RUN apk add --no-cache ca-certificates tzdata su-exec
+WORKDIR /opt/siyuan/
+COPY --from=GO_BUILD /opt/siyuan/ /opt/siyuan/
+
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
+    apk add --no-cache ca-certificates tzdata su-exec && \
+    chmod +x /opt/siyuan/entrypoint.sh
 
 ENV TZ=Asia/Shanghai
 ENV HOME=/home/siyuan
