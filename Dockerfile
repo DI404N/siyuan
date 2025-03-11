@@ -2,28 +2,25 @@ FROM node:21 AS NODE_BUILD
 
 WORKDIR /go/src/github.com/siyuan-note/siyuan/
 ADD . /go/src/github.com/siyuan-note/siyuan/
-RUN apt-get update && \
-    apt-get install -y jq
+
+# RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' /etc/apt/sources.list.d/debian.sources && \
+#     sed -i 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security/|g' /etc/apt/sources.list.d/debian.sources
+    
 RUN cd app && \
-packageManager=$(jq -r '.packageManager' package.json) && \
-if [ -n "$packageManager" ]; then \
-    npm install -g $packageManager; \
-else \
-    echo "No packageManager field found in package.json"; \
-    npm install -g pnpm; \
-fi && \
-pnpm install --registry=http://registry.npmjs.org/ --silent && \
-pnpm run build
-RUN apt-get purge -y jq
-RUN apt-get autoremove -y
-RUN rm -rf /var/lib/apt/lists/*
+    npm config set registry https://registry.npmmirror.com && \
+    npm install -g pnpm && \
+    pnpm config set registry https://registry.npmmirror.com && \
+    pnpm install --silent && \
+    pnpm run build
 
 FROM golang:alpine AS GO_BUILD
 WORKDIR /go/src/github.com/siyuan-note/siyuan/
 COPY --from=NODE_BUILD /go/src/github.com/siyuan-note/siyuan/ /go/src/github.com/siyuan-note/siyuan/
 ENV GO111MODULE=on
 ENV CGO_ENABLED=1
-RUN apk add --no-cache gcc musl-dev && \
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
+    apk add --no-cache gcc musl-dev && \
+    go env -w GOPROXY=https://goproxy.cn,direct && \
     cd kernel && go build --tags fts5 -v -ldflags "-s -w" && \
     mkdir /opt/siyuan/ && \
     mv /go/src/github.com/siyuan-note/siyuan/app/appearance/ /opt/siyuan/ && \
@@ -40,7 +37,8 @@ LABEL maintainer="Liang Ding<845765@qq.com>"
 WORKDIR /opt/siyuan/
 COPY --from=GO_BUILD /opt/siyuan/ /opt/siyuan/
 
-RUN apk add --no-cache ca-certificates tzdata su-exec && \
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
+    apk add --no-cache ca-certificates tzdata su-exec && \
     chmod +x /opt/siyuan/entrypoint.sh
 
 ENV TZ=Asia/Shanghai
