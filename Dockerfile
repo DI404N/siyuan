@@ -10,7 +10,7 @@ RUN cd app && \
     npm config set registry https://registry.npmmirror.com && \
     npm install -g pnpm && \
     pnpm config set registry https://registry.npmmirror.com && \
-    pnpm install --silent && \
+    pnpm install && \
     pnpm run build
 
 FROM golang:alpine AS GO_BUILD
