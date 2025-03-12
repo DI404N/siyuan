@@ -2,12 +2,20 @@ FROM node:21 AS NODE_BUILD
 
 WORKDIR /go/src/github.com/siyuan-note/siyuan/
 ADD . /go/src/github.com/siyuan-note/siyuan/
-
-# RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' /etc/apt/sources.list.d/debian.sources && \
-#     sed -i 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security/|g' /etc/apt/sources.list.d/debian.sources
     
-RUN cd app && \
+RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security/|g' /etc/apt/sources.list.d/debian.sources && \
     npm config set registry https://registry.npmmirror.com && \
+    apt-get update && \
+    apt-get install -y jq && \
+    cd app && \
+packageManager=$(jq -r '.packageManager' package.json) && \
+if [ -n "$packageManager" ]; then \
+    npm install -g $packageManager; \
+else \
+    echo "No packageManager field found in package.json"; \
+    npm install -g pnpm; \
+fi && \
     npm install -g pnpm && \
     pnpm config set registry https://registry.npmmirror.com && \
     pnpm install && \
