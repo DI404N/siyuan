@@ -6,9 +6,10 @@ RUN <<EORUN
 #!/bin/bash -e
 sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' /etc/apt/sources.list.d/debian.sources
 sed -i 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security/|g' /etc/apt/sources.list.d/debian.sources
+npm config set registry ${NPM_REGISTRY}
+export COREPACK_NPM_REGISTRY=${NPM_REGISTRY}
 corepack enable
 corepack install --global $(node -e 'console.log(require("./package.json").packageManager)')
-npm config set registry ${NPM_REGISTRY}
 pnpm config set registry ${NPM_REGISTRY}
 pnpm install --silent
 EORUN
