@@ -7,8 +7,10 @@ RUN <<EORUN
 sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' /etc/apt/sources.list.d/debian.sources
 sed -i 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security/|g' /etc/apt/sources.list.d/debian.sources
 npm config set registry ${NPM_REGISTRY}
-npm install -g $(node -e 'console.log(require("./package.json").packageManager)')
+PACKAGE_MANAGER=$(node -e 'console.log(require("./package.json").packageManager)')
+npm install -g $PACKAGE_MANAGER
 pnpm config set registry ${NPM_REGISTRY}
+pnpm config set ELECTRON_MIRROR https://npmmirror.com/mirrors/electron/
 pnpm install --silent
 EORUN
 ADD app/ .
