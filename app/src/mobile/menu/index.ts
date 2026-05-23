@@ -1,13 +1,15 @@
 import {popSearch} from "./search";
 import {initAppearance} from "../settings/appearance";
+import {initConfigAssets} from "../settings/assets";
 import {closePanel} from "../util/closePanel";
 import {mountHelp, newDailyNote, newNotebook} from "../../util/mount";
 import {repos} from "../../config/repos";
+import {publish} from "../../config/publish";
 import {exitSiYuan, lockScreen, processSync} from "../../dialog/processSystem";
 import {openHistory} from "../../history/history";
 import {syncGuide} from "../../sync/syncGuide";
 import {openCard} from "../../card/openCard";
-import {activeBlur, hideKeyboardToolbar} from "../util/keyboardToolbar";
+import {activeBlur} from "../util/keyboardToolbar";
 import {initAI} from "../settings/ai";
 import {initRiffCard} from "../settings/riffCard";
 import {login, showAccountInfo} from "../settings/account";
@@ -19,9 +21,7 @@ import {App} from "../../index";
 import {
     isDisabledFeature,
     isHuawei,
-    isInAndroid,
-    isInHarmony,
-    isInIOS,
+    isInMobileApp,
     isIPhone
 } from "../../protyle/util/compatibility";
 import {newFile} from "../../util/newFile";
@@ -29,10 +29,10 @@ import {afterLoadPlugin} from "../../plugin/loader";
 import {commandPanel} from "../../boot/globalEvent/command/panel";
 import {openTopBarMenu} from "../../plugin/openTopBarMenu";
 import {initFileTree} from "../settings/fileTree";
+import {initExport} from "../settings/export";
 
 export const popMenu = () => {
     activeBlur();
-    hideKeyboardToolbar();
     document.getElementById("menu").style.transform = "translateX(0px)";
 };
 
@@ -88,7 +88,7 @@ export const initRightMenu = (app: App) => {
         <svg class="b3-menu__icon"><use xlink:href="#iconCalendar"></use></svg><span class="b3-menu__label">${window.siyuan.languages.dailyNote}</span>
     </div>
     <div id="menuCard" class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}">
-        <svg class="b3-menu__icon" style="color: var(--b3-theme-secondary)"><use xlink:href="#iconRiffCard"></use></svg><span class="b3-menu__label">${window.siyuan.languages.spaceRepetition}</span>
+        <svg class="b3-menu__icon"><use xlink:href="#iconRiffCard"></use></svg><span class="b3-menu__label">${window.siyuan.languages.spaceRepetition}</span>
     </div>
     <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuLock">
         <svg class="b3-menu__icon"><use xlink:href="#iconLock"></use></svg><span class="b3-menu__label">${window.siyuan.languages.lockScreen}</span>
@@ -96,8 +96,8 @@ export const initRightMenu = (app: App) => {
     <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuHistory">
         <svg class="b3-menu__icon"><use xlink:href="#iconHistory"></use></svg><span class="b3-menu__label">${window.siyuan.languages.dataHistory}</span>
     </div>
-    <div class="b3-menu__separator${(isInAndroid() || isInIOS() || isInHarmony()) ? "" : " fn__none"}"></div>
-    <div class="b3-menu__item b3-menu__item--warning${(isInAndroid() || isInIOS() || isInHarmony()) ? "" : " fn__none"}" id="menuSafeQuit">
+    <div class="b3-menu__separator${isInMobileApp() ? "" : " fn__none"}"></div>
+    <div class="b3-menu__item b3-menu__item--warning${isInMobileApp() ? "" : " fn__none"}" id="menuSafeQuit">
         <svg class="b3-menu__icon"><use xlink:href="#iconQuit"></use></svg><span class="b3-menu__label">${window.siyuan.languages.safeQuit}</span>
     </div>
     <div class="b3-menu__separator"></div>
@@ -111,13 +111,22 @@ export const initRightMenu = (app: App) => {
         <svg class="b3-menu__icon"><use xlink:href="#iconRiffCard"></use></svg><span class="b3-menu__label">${window.siyuan.languages.riffCard}</span>
     </div>
     ${aiHTML}
+    <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuAssets">
+        <svg class="b3-menu__icon"><use xlink:href="#iconImage"></use></svg><span class="b3-menu__label">${window.siyuan.languages.assets}</span>
+    </div>
+    <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuExport">
+        <svg class="b3-menu__icon"><use xlink:href="#iconUpload"></use></svg><span class="b3-menu__label">${window.siyuan.languages.export}</span>
+    </div>
     <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuAppearance">
         <svg class="b3-menu__icon"><use xlink:href="#iconTheme"></use></svg><span class="b3-menu__label">${window.siyuan.languages.appearance}</span>
     </div>
     <div id="menuSync" class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}">
         <svg class="b3-menu__icon"><use xlink:href="#iconCloud"></use></svg><span class="b3-menu__label">${window.siyuan.languages.cloud}</span>
     </div>
-    <div class="b3-menu__item" id="menuAbout">
+    <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuPublish">
+        <svg class="b3-menu__icon"><use xlink:href="#iconLanguage"></use></svg><span class="b3-menu__label">${window.siyuan.languages.publish}</span>
+    </div>
+    <div class="b3-menu__item${window.siyuan.config.readonly ? " fn__none" : ""}" id="menuAbout">
         <svg class="b3-menu__icon"><use xlink:href="#iconInfo"></use></svg><span class="b3-menu__label">${window.siyuan.languages.about}</span>
     </div>
     <div class="b3-menu__item" id="menuPlugin">
@@ -163,6 +172,16 @@ export const initRightMenu = (app: App) => {
                 break;
             } else if (target.id === "menuAppearance") {
                 initAppearance();
+                event.preventDefault();
+                event.stopPropagation();
+                break;
+            } else if (target.id === "menuAssets") {
+                initConfigAssets(app);
+                event.preventDefault();
+                event.stopPropagation();
+                break;
+            } else if (target.id === "menuExport") {
+                initExport();
                 event.preventDefault();
                 event.stopPropagation();
                 break;
@@ -246,6 +265,19 @@ export const initRightMenu = (app: App) => {
                     bindEvent(modelMainElement: HTMLElement) {
                         repos.element = modelMainElement;
                         repos.bindEvent();
+                    }
+                });
+                event.preventDefault();
+                event.stopPropagation();
+                break;
+            } else if (target.id === "menuPublish") {
+                openModel({
+                    title: window.siyuan.languages.publish,
+                    icon: "iconLanguage",
+                    html: publish.genHTML(),
+                    bindEvent(modelMainElement: HTMLElement) {
+                        publish.element = modelMainElement;
+                        publish.bindEvent();
                     }
                 });
                 event.preventDefault();

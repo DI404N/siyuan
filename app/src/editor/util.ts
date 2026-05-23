@@ -5,15 +5,14 @@ import {getInstanceById, getWndByLayout, pdfIsLoading, setPanelFocus} from "../l
 import {getDockByType} from "../layout/tabUtil";
 import {getAllModels, getAllTabs} from "../layout/getAll";
 import {highlightById, scrollCenter} from "../util/highlightById";
-import {getDisplayName, pathPosix, showFileInFolder} from "../util/pathName";
+import {getDisplayName, pathPosix, useShell} from "../util/pathName";
 import {Constants} from "../constants";
-import {setEditMode} from "../protyle/util/setEditMode";
 import {Files} from "../layout/dock/Files";
 import {fetchPost, fetchSyncPost} from "../util/fetch";
-import {focusBlock, focusByRange} from "../protyle/util/selection";
+import {focusBlock, focusByOffset, focusByRange} from "../protyle/util/selection";
 import {onGet} from "../protyle/util/onGet";
 /// #if !BROWSER
-import {ipcRenderer, shell} from "electron";
+import {ipcRenderer} from "electron";
 /// #endif
 import {pushBack} from "../util/backForward";
 import {Asset} from "../asset";
@@ -35,6 +34,7 @@ import {newCardModel} from "../card/newCardTab";
 import {preventScroll} from "../protyle/scroll/preventScroll";
 import {clearOBG} from "../layout/dock/util";
 import {Model} from "../layout/Model";
+import {hideElements} from "../protyle/ui/hideElements";
 
 export const openFileById = async (options: {
     app: App,
@@ -46,7 +46,8 @@ export const openFileById = async (options: {
     zoomIn?: boolean
     removeCurrentTab?: boolean
     openNewTab?: boolean
-    afterOpen?: (model: Model) => void
+    afterOpen?: (model: Model) => void,
+    scrollPosition?: ScrollLogicalPosition
 }) => {
     const response = await fetchSyncPost("/api/block/getBlockInfo", {id: options.id});
     if (response.code === -1) {
@@ -56,6 +57,7 @@ export const openFileById = async (options: {
         showMessage(response.msg);
         return;
     }
+
     return openFile({
         app: options.app,
         fileName: response.data.rootTitle,
@@ -69,12 +71,13 @@ export const openFileById = async (options: {
         keepCursor: options.keepCursor,
         removeCurrentTab: options.removeCurrentTab,
         afterOpen: options.afterOpen,
-        openNewTab: options.openNewTab
+        openNewTab: options.openNewTab,
+        scrollPosition: options.scrollPosition,
     });
 };
 
 export const openAsset = (app: App, assetPath: string, page: number | string, position?: string) => {
-    const suffix = pathPosix().extname(assetPath.split("?page")[0]);
+    const suffix = pathPosix().extname(assetPath).split("?")[0];
     if (!Constants.SIYUAN_ASSETS_EXTS.includes(suffix)) {
         return;
     }
@@ -209,6 +212,7 @@ export const openFile = async (options: IOpenFileOptions) => {
         hasMatch = await ipcRenderer.invoke(Constants.SIYUAN_GET, {
             cmd: Constants.SIYUAN_OPEN_FILE,
             options: JSON.stringify(optionsClone),
+            port: location.port,
         });
         if (hasMatch) {
             if (options.afterOpen) {
@@ -336,6 +340,7 @@ const getUnInitTab = (options: IOpenFileOptions) => {
                 } else {
                     initObj.action = options.action;
                 }
+                initObj.scrollPosition = options.scrollPosition;
                 item.headElement.setAttribute("data-initdata", JSON.stringify(initObj));
                 item.parent.switchTab(item.headElement);
                 return true;
@@ -355,7 +360,6 @@ const switchEditor = (editor: Editor, options: IOpenFileOptions, allModels: IMod
     editor.parent.parent.switchTab(editor.parent.headElement);
     editor.parent.parent.showHeading();
     if (options.mode !== "preview" && !editor.editor.protyle.preview.element.classList.contains("fn__none")) {
-        // TODO https://github.com/siyuan-note/siyuan/issues/3059
         return true;
     }
     if (options.zoomIn) {
@@ -375,43 +379,73 @@ const switchEditor = (editor: Editor, options: IOpenFileOptions, allModels: IMod
             mode: (options.action && options.action.includes(Constants.CB_GET_CONTEXT)) ? 3 : 0,
             size: window.siyuan.config.editor.dynamicLoadBlocks,
         }, getResponse => {
-            onGet({data: getResponse, protyle: editor.editor.protyle, action: options.action});
+            onGet({
+                data: getResponse,
+                protyle: editor.editor.protyle,
+                action: options.action,
+                scrollPosition: options.scrollPosition
+            });
             // 大纲点击折叠标题下的内容时，需更新反链面板
             updateBacklinkGraph(allModels, editor.editor.protyle);
         });
     } else {
         // 点击大纲产生滚动时会动态加载内容，最终导致定位不准确
         preventScroll(editor.editor.protyle);
+        editor.editor.protyle.observerLoad?.disconnect();
         if (options.action?.includes(Constants.CB_GET_HL)) {
-            highlightById(editor.editor.protyle, options.id, true);
-        } else if (options.action?.includes(Constants.CB_GET_FOCUS)) {
+            highlightById(editor.editor.protyle, options.id, "start");
+        }
+        if (options.action?.includes(Constants.CB_GET_FOCUS)) {
             if (nodeElement) {
-                const newRange = focusBlock(nodeElement);
-                if (newRange) {
-                    editor.editor.protyle.toolbar.range = newRange;
+                let scrollTop: number;
+                if (options.action.includes(Constants.CB_GET_SEARCH)) {
+                    const scrollAttr = window.siyuan.storage[Constants.LOCAL_FILEPOSITION][editor.editor.protyle.block.rootID];
+                    focusByOffset(nodeElement, scrollAttr.focusStart, scrollAttr.focusEnd);
+                    scrollTop = scrollAttr.scrollTop;
+                } else {
+                    const newRange = focusBlock(nodeElement, undefined, !options.action?.includes(Constants.CB_GET_OUTLINE));
+                    if (newRange) {
+                        editor.editor.protyle.toolbar.range = newRange;
+                    }
                 }
-                scrollCenter(editor.editor.protyle, nodeElement, true);
+                if (typeof scrollTop === "number") {
+                    editor.editor.protyle.contentElement.scrollTop = scrollTop;
+                } else {
+                    scrollCenter(editor.editor.protyle, (editor.editor.protyle.disabled || options.scrollPosition) ? nodeElement : null, options.scrollPosition);
+                }
+                editor.editor.protyle.observerLoad = new ResizeObserver(() => {
+                    if (document.contains(nodeElement)) {
+                        if (typeof scrollTop === "number") {
+                            editor.editor.protyle.contentElement.scrollTop = scrollTop;
+                        } else {
+                            scrollCenter(editor.editor.protyle, (editor.editor.protyle.disabled || options.scrollPosition) ? nodeElement : null, options.scrollPosition);
+                        }
+                    }
+                });
+                setTimeout(() => {
+                    editor.editor.protyle.observerLoad.disconnect();
+                }, 1000 * 3);
+                editor.editor.protyle.observerLoad.observe(editor.editor.protyle.wysiwyg.element);
             } else if (editor.editor.protyle.block.rootID === options.id) {
                 // 由于 https://github.com/siyuan-note/siyuan/issues/5420，移除定位
             } else if (editor.editor.protyle.toolbar.range) {
                 nodeElement = hasClosestBlock(editor.editor.protyle.toolbar.range.startContainer) as Element;
                 focusByRange(editor.editor.protyle.toolbar.range);
-                if (nodeElement) {
-                    scrollCenter(editor.editor.protyle, nodeElement);
-                }
+                scrollCenter(editor.editor.protyle, undefined, options.scrollPosition);
             }
         }
-        pushBack(editor.editor.protyle, undefined, nodeElement || editor.editor.protyle.wysiwyg.element.firstElementChild);
+        pushBack(editor.editor.protyle, editor.editor.protyle.toolbar.range);
     }
-    if (options.mode) {
-        setEditMode(editor.editor.protyle, options.mode);
+    // https://github.com/siyuan-note/siyuan/issues/16445
+    if (options.action?.includes(Constants.CB_GET_OUTLINE)) {
+        hideElements(["select"], editor.editor.protyle);
     }
 };
 
 const newTab = (options: IOpenFileOptions) => {
     let tab: Tab;
     if (options.assetPath) {
-        const suffix = pathPosix().extname(options.assetPath.split("?page")[0]);
+        const suffix = pathPosix().extname(options.assetPath).split("?")[0];
         if (Constants.SIYUAN_ASSETS_EXTS.includes(suffix)) {
             let icon = "iconPDF";
             if (Constants.SIYUAN_ASSETS_IMAGE.includes(suffix)) {
@@ -495,6 +529,7 @@ const newTab = (options: IOpenFileOptions) => {
                         blockId: options.id,
                         rootId: options.rootID,
                         action: [Constants.CB_GET_ALL, Constants.CB_GET_FOCUS],
+                        scrollPosition: options.scrollPosition,
                     });
                 } else {
                     editor = new Editor({
@@ -504,6 +539,7 @@ const newTab = (options: IOpenFileOptions) => {
                         rootId: options.rootID,
                         mode: options.mode,
                         action: options.action,
+                        scrollPosition: options.scrollPosition,
                     });
                 }
                 tab.addModel(editor);
@@ -592,6 +628,9 @@ export const updateOutline = (models: IModels, protyle: IProtyle, reload = false
             let blockId = "";
             if (protyle && protyle.block) {
                 blockId = protyle.block.rootID;
+                if (!blockId && reload && item.type === "local") {
+                    blockId = item.blockId;
+                }
             }
             if (blockId === item.blockId && !reload && item.isPreview !== protyle.preview.element.classList.contains("fn__none")) {
                 return;
@@ -608,7 +647,7 @@ export const updateOutline = (models: IModels, protyle: IProtyle, reload = false
                 item.isPreview = !protyle.preview.element.classList.contains("fn__none");
                 item.update(response, blockId);
                 if (protyle) {
-                    item.updateDocTitle(protyle.background.ial);
+                    item.updateDocTitle(protyle.background.ial, response.data?.length || 0);
                     if (getSelection().rangeCount > 0) {
                         const startContainer = getSelection().getRangeAt(0).startContainer;
                         if (protyle.wysiwyg.element.contains(startContainer)) {
@@ -663,8 +702,8 @@ export const updateBacklinkGraph = (models: IModels, protyle: IProtyle) => {
         }
         item.element.querySelector('.block__icon[data-type="refresh"] svg').classList.add("fn__rotate");
         fetchPost("/api/ref/getBacklink2", {
-            sort: item.status[blockId] ? item.status[blockId].sort : "3",
-            mSort: item.status[blockId] ? item.status[blockId].mSort : "3",
+            sort: item.status[blockId] ? item.status[blockId].sort.toString() : window.siyuan.config.editor.backlinkSort.toString(),
+            mSort: item.status[blockId] ? item.status[blockId].mSort.toString() : window.siyuan.config.editor.backmentionSort.toString(),
             id: blockId || "",
             k: item.inputsElement[0].value,
             mk: item.inputsElement[1].value,
@@ -685,9 +724,9 @@ export const openBy = (url: string, type: "folder" | "app") => {
     if (url.startsWith("assets/")) {
         fetchPost("/api/asset/resolveAssetPath", {path: url.replace(/\.pdf\?page=\d{1,}$/, ".pdf")}, (response) => {
             if (type === "app") {
-                shell.openPath(response.data);
+                useShell("openPath", response.data);
             } else if (type === "folder") {
-                showFileInFolder(response.data);
+                useShell("showItemInFolder", response.data);
             }
         });
         return;
@@ -703,7 +742,7 @@ export const openBy = (url: string, type: "folder" | "app") => {
     // 拖入文件名包含 `)` 、`(` 的文件以 `file://` 插入后链接解析错误 https://github.com/siyuan-note/siyuan/issues/5786
     address = address.replace(/\\\)/g, ")").replace(/\\\(/g, "(");
     if (type === "app") {
-        shell.openPath(address);
+        useShell("openPath", address);
     } else if (type === "folder") {
         if ("windows" === window.siyuan.config.system.os) {
             if (!address.startsWith("\\\\")) { // \\ 开头的路径是 Windows 网络共享路径 https://github.com/siyuan-note/siyuan/issues/5980
@@ -711,7 +750,7 @@ export const openBy = (url: string, type: "folder" | "app") => {
                 address = address.replace(/\\\\/g, "\\");
             }
         }
-        showFileInFolder(address);
+        useShell("showItemInFolder", address);
     }
     /// #endif
 };

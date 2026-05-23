@@ -1,4 +1,6 @@
-[中文](https://github.com/siyuan-note/siyuan/blob/master/API_zh_CN.md)
+**English**
+| [中文](API_zh_CN.md)
+| [日本語](API_ja_JP.md)
 
 * [Specification](#Specification)
     * [Parameters and return values](#Parameters-and-return-values)
@@ -480,7 +482,7 @@ Move documents by `id`:
   ```
 
     * `fromIDs`: Source docs' IDs
-    * `toID`: Target parent ID
+    * `toID`: Target parent doc's ID or notebook ID
 * Return value
 
   ```json
@@ -1097,6 +1099,8 @@ Move documents by `id`:
     ]
   }
   ```
+
+Note: To ensure data security, access to this interface is prohibited in Publish Mode.
 
 ### Flush transaction
 

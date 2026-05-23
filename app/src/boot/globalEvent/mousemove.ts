@@ -4,12 +4,36 @@ import {hasClosestBlock, hasClosestByClassName, hasClosestByTag} from "../../pro
 import {getColIndex} from "../../protyle/util/table";
 
 const getRightBlock = (element: HTMLElement, x: number, y: number) => {
-    let index = 1;
+    let left = x + 34;
     let nodeElement = element;
-    while (nodeElement && (nodeElement.classList.contains("list") || nodeElement.classList.contains("li"))) {
-        nodeElement = document.elementFromPoint(x + 73 * index, y) as HTMLElement;
+    if (nodeElement && nodeElement.classList.contains("protyle-action")) {
+        return nodeElement;
+    }
+    let lastNodeElement;
+    while (nodeElement && (
+        nodeElement.classList.contains("list") || nodeElement.classList.contains("li") ||
+        nodeElement.classList.contains("bq") || nodeElement.classList.contains("callout")
+    )) {
+        nodeElement = document.elementFromPoint(left, y) as HTMLElement;
+        const calloutInfoElement = hasClosestByClassName(nodeElement, "callout-info");
+        if (calloutInfoElement) {
+            nodeElement = calloutInfoElement;
+            break;
+        }
         nodeElement = hasClosestBlock(nodeElement) as HTMLElement;
-        index++;
+        if (lastNodeElement && lastNodeElement === nodeElement) {
+            break;
+        }
+        lastNodeElement = nodeElement;
+        if (nodeElement) {
+            if (nodeElement.classList.contains("bq") || nodeElement.classList.contains("callout")) {
+                left += 10;
+            } else {
+                left += 34;
+            }
+        } else {
+            left += 34;
+        }
     }
     return nodeElement;
 };
@@ -101,15 +125,11 @@ export const windowMouseMove = (event: MouseEvent, mouseIsEnter: boolean) => {
             if (!targetBlockElement) {
                 return;
             }
-            let rowElement: Element;
-            if (targetBlockElement.classList.contains("av")) {
-                rowElement = hasClosestByClassName(mouseElement, "av__row") as HTMLElement;
-            }
             const allModels = getAllModels();
             let findNode = false;
             allModels.editor.find(item => {
-                if (item.editor.protyle.wysiwyg.element.isSameNode(eventPath0)) {
-                    item.editor.protyle.gutter.render(item.editor.protyle, targetBlockElement, item.editor.protyle.wysiwyg.element, rowElement);
+                if (item.editor.protyle.wysiwyg.element === eventPath0) {
+                    item.editor.protyle.gutter.render(item.editor.protyle, targetBlockElement, mouseElement);
                     findNode = true;
                     return true;
                 }
@@ -118,7 +138,7 @@ export const windowMouseMove = (event: MouseEvent, mouseIsEnter: boolean) => {
                 window.siyuan.blockPanels.find(item => {
                     item.editors.find(eItem => {
                         if (eItem.protyle.wysiwyg.element.contains(eventPath0)) {
-                            eItem.protyle.gutter.render(eItem.protyle, targetBlockElement, eItem.protyle.wysiwyg.element, rowElement);
+                            eItem.protyle.gutter.render(eItem.protyle, targetBlockElement, mouseElement);
                             findNode = true;
                             return true;
                         }
@@ -131,8 +151,8 @@ export const windowMouseMove = (event: MouseEvent, mouseIsEnter: boolean) => {
             if (!findNode) {
                 allModels.backlink.find(item => {
                     item.editors.find(eItem => {
-                        if (eItem.protyle.wysiwyg.element.isSameNode(eventPath0)) {
-                            eItem.protyle.gutter.render(eItem.protyle, targetBlockElement, eItem.protyle.wysiwyg.element, rowElement);
+                        if (eItem.protyle.wysiwyg.element === eventPath0) {
+                            eItem.protyle.gutter.render(eItem.protyle, targetBlockElement, mouseElement);
                             findNode = true;
                             return true;
                         }
@@ -145,7 +165,11 @@ export const windowMouseMove = (event: MouseEvent, mouseIsEnter: boolean) => {
         }
         return;
     }
-    if (eventPath0 && eventPath0.nodeType !== 3 && (eventPath0.classList.contains("li") || eventPath0.classList.contains("list"))) {
+    if (eventPath0 && eventPath0.nodeType !== 3 && (
+        eventPath0.classList.contains("li") ||
+        eventPath0.classList.contains("list") ||
+        (eventPath0.classList.contains("protyle-action") && eventPath0.getAttribute("data-type") === "NodeListItem")
+    )) {
         // 光标在列表下部应显示右侧的元素，而不是列表本身
         const targetBlockElement = getRightBlock(eventPath0, eventPath0.getBoundingClientRect().left + 1, event.clientY);
         if (!targetBlockElement) {
@@ -155,7 +179,7 @@ export const windowMouseMove = (event: MouseEvent, mouseIsEnter: boolean) => {
         let findNode = false;
         allModels.editor.find(item => {
             if (item.editor.protyle.wysiwyg.element.contains(eventPath0)) {
-                item.editor.protyle.gutter.render(item.editor.protyle, targetBlockElement, item.editor.protyle.wysiwyg.element);
+                item.editor.protyle.gutter.render(item.editor.protyle, targetBlockElement);
                 findNode = true;
                 return true;
             }
@@ -164,7 +188,7 @@ export const windowMouseMove = (event: MouseEvent, mouseIsEnter: boolean) => {
             window.siyuan.blockPanels.find(item => {
                 item.editors.find(eItem => {
                     if (eItem.protyle.wysiwyg.element.contains(eventPath0)) {
-                        eItem.protyle.gutter.render(eItem.protyle, targetBlockElement, eItem.protyle.wysiwyg.element);
+                        eItem.protyle.gutter.render(eItem.protyle, targetBlockElement);
                         findNode = true;
                         return true;
                     }
@@ -178,7 +202,7 @@ export const windowMouseMove = (event: MouseEvent, mouseIsEnter: boolean) => {
             allModels.backlink.find(item => {
                 item.editors.find(eItem => {
                     if (eItem.protyle.wysiwyg.element.contains(eventPath0)) {
-                        eItem.protyle.gutter.render(eItem.protyle, targetBlockElement, eItem.protyle.wysiwyg.element);
+                        eItem.protyle.gutter.render(eItem.protyle, targetBlockElement);
                         findNode = true;
                         return true;
                     }
@@ -198,7 +222,7 @@ export const windowMouseMove = (event: MouseEvent, mouseIsEnter: boolean) => {
             if (rowElement && !rowElement.classList.contains("av__row--header")) {
                 getAllEditor().find(item => {
                     if (item.protyle.wysiwyg.element.contains(eventPath0)) {
-                        item.protyle.gutter.render(item.protyle, eventPath0, item.protyle.wysiwyg.element, rowElement);
+                        item.protyle.gutter.render(item.protyle, eventPath0, rowElement);
                         return true;
                     }
                 });
@@ -217,22 +241,27 @@ export const windowMouseMove = (event: MouseEvent, mouseIsEnter: boolean) => {
     const blockElement = hasClosestByClassName(target, "table");
     if (blockElement && blockElement.style.cursor !== "col-resize" && !hasClosestByClassName(blockElement, "protyle-wysiwyg__embed")) {
         const cellElement = (hasClosestByTag(target, "TH") || hasClosestByTag(target, "TD")) as HTMLTableCellElement;
-        if (cellElement) {
-            const tableElement = blockElement.querySelector("table");
-            const tableHeight = blockElement.querySelector("table").clientHeight;
+        const tableElement = blockElement.querySelector("table");
+        if (cellElement && tableElement) {
             const resizeElement = blockElement.querySelector(".table__resize");
             if (blockElement.style.textAlign === "center" || blockElement.style.textAlign === "right") {
                 resizeElement.parentElement.style.left = tableElement.offsetLeft + "px";
             } else {
                 resizeElement.parentElement.style.left = "";
             }
-            const rect = cellElement.getBoundingClientRect();
-            if (rect.right - event.clientX < 3 && rect.right - event.clientX > 0) {
-                resizeElement.setAttribute("data-col-index", (getColIndex(cellElement) + cellElement.colSpan - 1).toString());
-                resizeElement.setAttribute("style", `height:${tableHeight}px;left: ${Math.round(cellElement.offsetWidth + cellElement.offsetLeft - blockElement.firstElementChild.scrollLeft - 3)}px;display:block`);
-            } else if (event.clientX - rect.left < 3 && event.clientX - rect.left > 0 && cellElement.previousElementSibling) {
-                resizeElement.setAttribute("data-col-index", (getColIndex(cellElement) - 1).toString());
-                resizeElement.setAttribute("style", `height:${tableHeight}px;left: ${Math.round(cellElement.offsetLeft - blockElement.firstElementChild.scrollLeft - 3)}px;display:block`);
+
+            if (tableElement.getAttribute("contenteditable") === "true") {
+                const tableHeight = blockElement.querySelector("colgroup").clientHeight;
+                const captionElement = blockElement.querySelector("caption");
+                const captionHeight = (captionElement && captionElement.style.captionSide !== "bottom") ? captionElement.clientHeight : 0;
+                const rect = cellElement.getBoundingClientRect();
+                if (rect.right - event.clientX < 3 && rect.right - event.clientX > 0) {
+                    resizeElement.setAttribute("data-col-index", (getColIndex(cellElement) + cellElement.colSpan - 1).toString());
+                    resizeElement.setAttribute("style", `top:${captionHeight}px;height:${tableHeight}px;left: ${Math.round(cellElement.offsetWidth + cellElement.offsetLeft - blockElement.firstElementChild.scrollLeft - 3)}px;display:block`);
+                } else if (event.clientX - rect.left < 3 && event.clientX - rect.left > 0 && cellElement.previousElementSibling) {
+                    resizeElement.setAttribute("data-col-index", (getColIndex(cellElement) - 1).toString());
+                    resizeElement.setAttribute("style", `top:${captionHeight}px;height:${tableHeight}px;left: ${Math.round(cellElement.offsetLeft - blockElement.firstElementChild.scrollLeft - 3)}px;display:block`);
+                }
             }
         }
     }

@@ -1,3 +1,6 @@
+@use "../util/mixin";
+@use "../component/list";
+
 .b3-menu {
   position: fixed;
   border-radius: var(--b3-border-radius-b);
@@ -33,14 +36,14 @@
   }
 
   &--fullscreen {
-    top: 100vh;
+    top: 100%;
     left: 0;
     width: 100%;
     border: 0;
     box-shadow: none;
     right: 0;
     max-height: none;
-    height: 100vh;
+    height: 100%;
     padding: 0;
     border-radius: 0;
     transition: transform .15s cubic-bezier(0, 0, .2, 1) 0ms;
@@ -90,7 +93,7 @@
 
         &--show {
           & > .b3-menu__submenu {
-            transform: translateX(-100vw);
+            transform: translateX(-100%);
           }
 
           & > .b3-menu__submenu--row {
@@ -157,7 +160,7 @@
     }
 
     .b3-menu__label {
-      @include text-clamp(1);
+      @include mixin.text-clamp(1);
       max-width: 30vw;
       white-space: nowrap;
       overflow: hidden;
@@ -166,7 +169,6 @@
   }
 
   &__items {
-    max-height: 80vh;
     overflow: auto;
     padding: 0 8px;
   }
@@ -264,6 +266,10 @@
       opacity: .38;
       cursor: not-allowed;
     }
+
+    &--hidden {
+      opacity: .38;
+    }
   }
 
   &__action {
@@ -278,6 +284,10 @@
     box-sizing: border-box;
     translate: var(--b3-transition);
 
+    &--show {
+      opacity: 1;
+    }
+
     &:hover {
       color: var(--b3-theme-on-background);
       background-color: var(--b3-list-icon-hover);
@@ -291,6 +301,13 @@
   &__label {
     flex: 1;
     min-width: 84px;
+  }
+
+  &__labels {
+    font-size: 12px;
+    margin-bottom: 4px;
+    line-height: 20px;
+    color: var(--b3-theme-on-surface);
   }
 
   &__icon {
@@ -349,7 +366,6 @@
   &__submenu {
     overflow: auto;
     display: none;
-    max-height: 80vh;
     border: 1px solid var(--b3-theme-surface-lighter);
     border-radius: var(--b3-border-radius-b);
     background-color: var(--b3-menu-background);
@@ -357,13 +373,14 @@
     position: fixed;
     box-shadow: var(--b3-dialog-shadow);
     z-index: 1;
+    cursor: default;
   }
 
   &__accelerator {
     font-size: .75rem;
     margin-left: 16px;
     color: var(--b3-theme-on-surface);
-    font-family: Consolas, "Liberation Mono", Menlo, Courier, monospace, var(--b3-font-family);
+    font-family: var(--b3-font-family-kbd);
   }
 
   // for protyle hint

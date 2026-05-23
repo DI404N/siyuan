@@ -17,7 +17,6 @@
 package model
 
 import (
-	"github.com/emirpasic/gods/sets/hashset"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,6 +27,7 @@ import (
 	"github.com/88250/lute/ast"
 	"github.com/88250/lute/editor"
 	"github.com/88250/lute/parse"
+	"github.com/emirpasic/gods/sets/hashset"
 	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/av"
 	"github.com/siyuan-note/siyuan/kernel/filesys"
@@ -67,7 +67,7 @@ func GetDocInfo(blockID string) (ret *BlockInfo) {
 	ret.IAL = parse.IAL2Map(tree.Root.KramdownIAL)
 	scrollData := ret.IAL["scroll"]
 	if 0 < len(scrollData) {
-		scroll := map[string]interface{}{}
+		scroll := map[string]any{}
 		if parseErr := gulu.JSON.UnmarshalJSON([]byte(scrollData), &scroll); nil != parseErr {
 			logging.LogWarnf("parse scroll data [%s] failed: %s", scrollData, parseErr)
 			delete(ret.IAL, "scroll")
@@ -150,7 +150,7 @@ func GetDocsInfo(blockIDs []string, queryRefCount bool, queryAv bool) (rets []*B
 		ret.IAL = parse.IAL2Map(tree.Root.KramdownIAL)
 		scrollData := ret.IAL["scroll"]
 		if 0 < len(scrollData) {
-			scroll := map[string]interface{}{}
+			scroll := map[string]any{}
 			if parseErr := gulu.JSON.UnmarshalJSON([]byte(scrollData), &scroll); nil != parseErr {
 				logging.LogWarnf("parse scroll data [%s] failed: %s", scrollData, parseErr)
 				delete(ret.IAL, "scroll")
@@ -288,7 +288,7 @@ func getNodeRefText(node *ast.Node) string {
 	return getNodeRefText0(node, Conf.Editor.BlockRefDynamicAnchorTextMaxLen, true)
 }
 
-func getNodeAvBlockText(node *ast.Node) (icon, content string) {
+func getNodeAvBlockText(node *ast.Node, avID string) (icon, content string) {
 	if nil == node {
 		return
 	}
@@ -303,10 +303,14 @@ func getNodeAvBlockText(node *ast.Node) (icon, content string) {
 	}
 
 	content = strings.TrimSpace(content)
+	if "" != avID {
+		if staticText := node.IALAttr(av.NodeAttrViewStaticText + "-" + avID); "" != staticText {
+			content = staticText
+		}
+	}
 	if "" == content {
 		content = Conf.language(105)
 	}
-
 	return
 }
 
@@ -491,7 +495,7 @@ func BuildBlockBreadcrumb(id string, excludeTypes []string) (ret []*BlockPath, e
 	return
 }
 
-func buildBlockBreadcrumb(node *ast.Node, excludeTypes []string, isEmbedBlock bool) (ret []*BlockPath) {
+func buildBlockBreadcrumb(node *ast.Node, excludeTypes []string, isEmbedBlock bool, headingMode ...int) (ret []*BlockPath) {
 	ret = []*BlockPath{}
 	if nil == node {
 		return
@@ -499,6 +503,12 @@ func buildBlockBreadcrumb(node *ast.Node, excludeTypes []string, isEmbedBlock bo
 	box := Conf.Box(node.Box)
 	if nil == box {
 		return
+	}
+
+	// 默认 headingMode 为 0
+	mode := 0
+	if len(headingMode) > 0 {
+		mode = headingMode[0]
 	}
 
 	headingLevel := 16
@@ -522,7 +532,7 @@ func buildBlockBreadcrumb(node *ast.Node, excludeTypes []string, isEmbedBlock bo
 			name, _ = av.GetAttributeViewName(parent.AttributeViewID)
 		} else {
 			if "" == name {
-				if ast.NodeListItem == parent.Type || ast.NodeList == parent.Type || ast.NodeSuperBlock == parent.Type || ast.NodeBlockquote == parent.Type {
+				if ast.NodeListItem == parent.Type || ast.NodeList == parent.Type || ast.NodeSuperBlock == parent.Type || ast.NodeBlockquote == parent.Type || ast.NodeCallout == parent.Type {
 					name = gulu.Str.SubStr(renderBlockText(fc, excludeTypes, true), maxNameLen)
 				} else {
 					name = gulu.Str.SubStr(renderBlockText(parent, excludeTypes, true), maxNameLen)
@@ -534,7 +544,7 @@ func buildBlockBreadcrumb(node *ast.Node, excludeTypes []string, isEmbedBlock bo
 		}
 
 		add := true
-		if ast.NodeList == parent.Type || ast.NodeSuperBlock == parent.Type || ast.NodeBlockquote == parent.Type {
+		if ast.NodeList == parent.Type || ast.NodeSuperBlock == parent.Type || ast.NodeBlockquote == parent.Type || ast.NodeCallout == parent.Type {
 			add = false
 			if parent == node {
 				// https://github.com/siyuan-note/siyuan/issues/13141#issuecomment-2476789553
@@ -560,8 +570,13 @@ func buildBlockBreadcrumb(node *ast.Node, excludeTypes []string, isEmbedBlock bo
 			}
 		} else {
 			if ast.NodeDocument != parent.Type {
-				// 在嵌入块中隐藏最后一个非文档路径的面包屑中的文本 Hide text in breadcrumb of last non-document path in embed block https://github.com/siyuan-note/siyuan/issues/13866
-				name = ""
+				// 当headingMode=2（仅显示标题下方的块）且当前节点是标题时，保留标题名称
+				if 2 == mode && ast.NodeHeading == parent.Type && parent == node {
+					// 保留标题名称，不清空
+				} else {
+					// 在嵌入块中隐藏最后一个非文档路径的面包屑中的文本 Hide text in breadcrumb of last non-document path in embed block https://github.com/siyuan-note/siyuan/issues/13866
+					name = ""
+				}
 			}
 		}
 
@@ -635,7 +650,7 @@ func buildBacklinkListItemRefs(refDefs []*RefDefs) (originalRefBlockIDs map[stri
 			continue
 		}
 
-		if "NodeListItem" == parent.Type || "NodeBlockquote" == parent.Type || "NodeSuperBlock" == parent.Type {
+		if "NodeListItem" == parent.Type || "NodeBlockquote" == parent.Type || "NodeSuperBlock" == parent.Type || "NodeCallout" == parent.Type {
 			refBlock := parentRefParagraphs[parent.ID]
 			if nil == refBlock {
 				continue

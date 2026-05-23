@@ -1,58 +1,52 @@
-FROM node:21 AS NODE_BUILD
+FROM --platform=$BUILDPLATFORM node:21 AS node-build
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+WORKDIR /app
+ADD app/package.json app/pnpm* app/.npmrc .
+RUN <<EORUN
+#!/bin/bash -e
+sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' /etc/apt/sources.list.d/debian.sources
+sed -i 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security/|g' /etc/apt/sources.list.d/debian.sources
+corepack enable
+corepack install --global $(node -e 'console.log(require("./package.json").packageManager)')
+npm config set registry ${NPM_REGISTRY}
+pnpm config set registry ${NPM_REGISTRY}
+pnpm install --silent
+EORUN
+ADD app/ .
+RUN <<EORUN
+#!/bin/bash -e
+pnpm run build
+mkdir /artifacts
+mv appearance stage guide changelogs /artifacts/
+EORUN
 
-WORKDIR /go/src/github.com/siyuan-note/siyuan/
-ADD . /go/src/github.com/siyuan-note/siyuan/
-    
-RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' /etc/apt/sources.list.d/debian.sources && \
-    sed -i 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security/|g' /etc/apt/sources.list.d/debian.sources && \
-    npm config set registry https://registry.npmmirror.com && \
-    apt-get update && \
-    apt-get install -y jq && \
-    cd app && \
-packageManager=$(jq -r '.packageManager' package.json) && \
-if [ -n "$packageManager" ]; then \
-    npm install -g $packageManager; \
-else \
-    echo "No packageManager field found in package.json"; \
-    npm install -g pnpm; \
-fi && \
-    npm install -g pnpm && \
-    pnpm config set registry https://registry.npmmirror.com && \
-    pnpm install && \
-    pnpm run build
-
-FROM golang:alpine AS GO_BUILD
-WORKDIR /go/src/github.com/siyuan-note/siyuan/
-COPY --from=NODE_BUILD /go/src/github.com/siyuan-note/siyuan/ /go/src/github.com/siyuan-note/siyuan/
-ENV GO111MODULE=on
-ENV CGO_ENABLED=1
-RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
-    apk add --no-cache gcc musl-dev && \
-    go env -w GOPROXY=https://goproxy.cn,direct && \
-    cd kernel && go build --tags fts5 -v -ldflags "-s -w" && \
-    mkdir /opt/siyuan/ && \
-    mv /go/src/github.com/siyuan-note/siyuan/app/appearance/ /opt/siyuan/ && \
-    mv /go/src/github.com/siyuan-note/siyuan/app/stage/ /opt/siyuan/ && \
-    mv /go/src/github.com/siyuan-note/siyuan/app/guide/ /opt/siyuan/ && \
-    mv /go/src/github.com/siyuan-note/siyuan/app/changelogs/ /opt/siyuan/ && \
-    mv /go/src/github.com/siyuan-note/siyuan/kernel/kernel /opt/siyuan/ && \
-    mv /go/src/github.com/siyuan-note/siyuan/kernel/entrypoint.sh /opt/siyuan/entrypoint.sh && \
-    find /opt/siyuan/ -name .git | xargs rm -rf
+FROM golang:1.25-alpine AS go-build
+RUN <<EORUN
+#!/bin/sh -e
+sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
+apk add --no-cache gcc musl-dev
+go env -w GO111MODULE=on
+go env -w CGO_ENABLED=1
+go env -w GOPROXY=https://goproxy.cn,direct
+EORUN
+WORKDIR /kernel
+ADD kernel/go.* .
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg \
+    go mod download
+ADD kernel/ .
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg \
+    go build -tags fts5 -v -ldflags "-s -w"
 
 FROM alpine:latest
 LABEL maintainer="Liang Ding<845765@qq.com>"
-
-WORKDIR /opt/siyuan/
-COPY --from=GO_BUILD /opt/siyuan/ /opt/siyuan/
-
 RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
-    apk add --no-cache ca-certificates tzdata su-exec && \
-    chmod +x /opt/siyuan/entrypoint.sh
-
+    apk add --no-cache ca-certificates tzdata su-exec
 ENV TZ=Asia/Shanghai
 ENV HOME=/home/siyuan
 ENV RUN_IN_CONTAINER=true
 EXPOSE 6806
-
+WORKDIR /opt/siyuan/
+COPY --from=go-build --chmod=755 /kernel/kernel /kernel/entrypoint.sh .
+COPY --from=node-build /artifacts .
 ENTRYPOINT ["/opt/siyuan/entrypoint.sh"]
 CMD ["/opt/siyuan/kernel"]

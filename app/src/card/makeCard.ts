@@ -71,7 +71,7 @@ export const makeCard = (app: App, ids: string[]) => {
         dialog.element.setAttribute("data-key", Constants.DIALOG_MAKECARD);
         dialog.element.addEventListener("click", (event) => {
             let target = event.target as HTMLElement;
-            while (target && !target.isSameNode(dialog.element)) {
+            while (target && target !== dialog.element) {
                 const type = target.getAttribute("data-type");
                 if (type === "create") {
                     let msgId = "";
@@ -183,9 +183,22 @@ export const quickMakeCard = (protyle: IProtyle, nodeElement: Element[]) => {
             return;
         }
         item.classList.remove("protyle-wysiwyg--select");
-        ids.push(item.getAttribute("data-node-id"));
         if ((item.getAttribute(Constants.CUSTOM_RIFF_DECKS) || "").indexOf(Constants.QUICK_DECK_ID) === -1) {
             isRemove = false;
+        }
+    });
+    nodeElement.forEach(item => {
+        if (item.getAttribute("data-type") === "NodeThematicBreak") {
+            return;
+        }
+        if (isRemove) {
+            if ((item.getAttribute(Constants.CUSTOM_RIFF_DECKS) || "").indexOf(Constants.QUICK_DECK_ID) > -1) {
+                ids.push(item.getAttribute("data-node-id"));
+            }
+        } else {
+            if ((item.getAttribute(Constants.CUSTOM_RIFF_DECKS) || "").indexOf(Constants.QUICK_DECK_ID) === -1) {
+                ids.push(item.getAttribute("data-node-id"));
+            }
         }
     });
     if (isRemove) {

@@ -1,8 +1,8 @@
 productName: "SiYuan"
 appId: "org.b3log.siyuan"
 asar: false
-compression: "store"
-copyright: "© 2024 Yunnan Liandi Technology Co., Ltd."
+compression: "normal"
+copyright: "© 2020-present Yunnan Liandi Technology Co., Ltd."
 artifactName: "siyuan-${version}-${os}-arm64.${ext}"
 extraMetadata:
   main: "electron/main.js"
@@ -10,6 +10,7 @@ directories:
   output: "build"
 files:
   - "electron"
+afterPack: "./scripts/afterPack.js"
 extraFiles:
   - from: "../LICENSE"
     to: "LICENSE"
@@ -68,3 +69,6 @@ extraResources:
     filter: "!**/{.DS_Store}"
   - from: "pandoc/pandoc-linux-arm64.zip"
     to: "pandoc.zip"
+  - from: "pandoc/pandoc-resources"
+    to: "pandoc-resources"
+    filter: "!**/{.DS_Store}"

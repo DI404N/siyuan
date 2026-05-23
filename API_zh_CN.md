@@ -1,4 +1,6 @@
-[English](https://github.com/siyuan-note/siyuan/blob/master/API.md)
+[English](API.md)
+| **中文**
+| [日本語](API_ja_JP.md)
 
 * [规范](#规范)
     * [参数和返回值](#参数和返回值)
@@ -478,7 +480,7 @@
   ```
 
     * `fromIDs`：源文档 ID
-    * `toID`：目标父文档 ID
+    * `toID`：目标父文档 ID 或笔记本 ID
 * 返回值
 
   ```json
@@ -1090,6 +1092,8 @@
     ]
   }
   ```
+  
+注意：为保证数据安全，发布模式下禁止访问该接口。
 
 ### 提交事务
 

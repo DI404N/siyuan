@@ -3,13 +3,11 @@ import {fetchPost} from "../util/fetch";
 import {escapeAriaLabel} from "../util/escape";
 import {setStorageVal, updateHotkeyTip} from "../protyle/util/compatibility";
 /// #if !MOBILE
-import {getQueryTip} from "./util";
+import {genQueryHTML} from "./util";
 /// #endif
 import {MenuItem} from "../menus/Menu";
 import {Dialog} from "../dialog";
 import {addClearButton} from "../util/addClearButton";
-import {isPaidUser} from "../util/needSubscribe";
-import {showMessage} from "../dialog/message";
 import {saveAssetKeyList} from "./toggleHistory";
 
 export const openSearchAsset = (element: HTMLElement, isStick: boolean) => {
@@ -33,7 +31,7 @@ export const openSearchAsset = (element: HTMLElement, isStick: boolean) => {
     <span data-type="assetNext" class="block__icon block__icon--show ariaLabel" data-position="9south" disabled="disabled" aria-label="${window.siyuan.languages.nextLabel}"><svg><use xlink:href='#iconRight'></use></svg></span>
     <span class="fn__space"></span>
     <span id="searchAssetResult" class="ft__selectnone"></span>
-    <span class="fn__flex-1"></span>
+    <span class="fn__flex-1${!isStick ? " resize__move" : ""}" style="min-height: 100%"></span>
     <span class="fn__space"></span>
     <span id="assetMore" aria-label="${window.siyuan.languages.more}" class="block__icon block__icon--show ariaLabel" data-position="9south">
         <svg><use xlink:href="#iconMore"></use></svg>
@@ -56,9 +54,7 @@ export const openSearchAsset = (element: HTMLElement, isStick: boolean) => {
             <svg><use xlink:href="#iconRefresh"></use></svg>
         </span>
         <span class="fn__space"></span>
-        <span id="assetSyntaxCheck" aria-label="${getQueryTip(localSearch.method)}" class="block__icon ariaLabel" data-position="9south">
-            <svg><use xlink:href="#iconRegex"></use></svg>
-        </span>
+        ${genQueryHTML(localSearch.method, "assetSyntaxCheck")}
         <span class="fn__space"></span>
         <span id="assetFilter" aria-label="${window.siyuan.languages.type}" class="block__icon ariaLabel" data-position="9south">
             <svg><use xlink:href="#iconFilter"></use></svg>
@@ -166,15 +162,6 @@ export const openSearchAsset = (element: HTMLElement, isStick: boolean) => {
 let inputTimeout: number;
 export const assetInputEvent = (element: Element, localSearch?: ISearchAssetOption, page = 1) => {
     const loadingElement = element.parentElement.querySelector(".fn__loading--top");
-    if (!isPaidUser()) {
-        loadingElement.classList.add("fn__none");
-        element.querySelector(".search__drag")?.classList.add("fn__none");
-        element.querySelector("#searchAssetPreview").classList.add("fn__none");
-        element.querySelector("#searchAssetList").innerHTML = `<div class="search__empty">
-    ${window.siyuan.languages["_kernel"][214]}
-</div>`;
-        return;
-    }
     loadingElement.classList.remove("fn__none");
     clearTimeout(inputTimeout);
     inputTimeout = window.setTimeout(() => {
@@ -272,14 +259,14 @@ export const renderNextAssetMark = (element: Element) => {
 export const assetMethodMenu = (target: HTMLElement, cb: () => void) => {
     const method = window.siyuan.storage[Constants.LOCAL_SEARCHASSET].method;
     if (!window.siyuan.menus.menu.element.classList.contains("fn__none") &&
-        window.siyuan.menus.menu.element.getAttribute("data-name") === "searchAssetMethod") {
+        window.siyuan.menus.menu.element.getAttribute("data-name") === Constants.MENU_SEARCH_ASSET_METHOD) {
         window.siyuan.menus.menu.remove();
         return;
     }
     window.siyuan.menus.menu.remove();
-    window.siyuan.menus.menu.element.setAttribute("data-name", "searchAssetMethod");
+    window.siyuan.menus.menu.element.setAttribute("data-name", Constants.MENU_SEARCH_ASSET_METHOD);
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: "",
+        icon: "iconExact",
         label: window.siyuan.languages.keyword,
         current: method === 0,
         click() {
@@ -288,7 +275,7 @@ export const assetMethodMenu = (target: HTMLElement, cb: () => void) => {
         }
     }).element);
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: "",
+        icon: "iconQuote",
         label: window.siyuan.languages.querySyntax,
         current: method === 1,
         click() {
@@ -297,7 +284,7 @@ export const assetMethodMenu = (target: HTMLElement, cb: () => void) => {
         }
     }).element);
     window.siyuan.menus.menu.append(new MenuItem({
-        iconHTML: "",
+        icon: "iconRegex",
         label: window.siyuan.languages.regex,
         current: method === 3,
         click() {
@@ -358,12 +345,12 @@ export const assetFilterMenu = (assetsElement: Element) => {
 
 export const assetMoreMenu = (target: Element, element: Element, cb: () => void) => {
     if (!window.siyuan.menus.menu.element.classList.contains("fn__none") &&
-        window.siyuan.menus.menu.element.getAttribute("data-name") === "searchAssetMore") {
+        window.siyuan.menus.menu.element.getAttribute("data-name") === Constants.MENU_SEARCH_ASSET_MORE) {
         window.siyuan.menus.menu.remove();
         return;
     }
     window.siyuan.menus.menu.remove();
-    window.siyuan.menus.menu.element.setAttribute("data-name", "searchAssetMore");
+    window.siyuan.menus.menu.element.setAttribute("data-name", Constants.MENU_SEARCH_ASSET_MORE);
     const localData = window.siyuan.storage[Constants.LOCAL_SEARCHASSET];
     const sortMenu = [{
         iconHTML: "",
@@ -450,10 +437,6 @@ export const assetMoreMenu = (target: Element, element: Element, cb: () => void)
         iconHTML: "",
         label: window.siyuan.languages.rebuildIndex,
         click() {
-            if (!isPaidUser()) {
-                showMessage(window.siyuan.languages["_kernel"][214]);
-                return;
-            }
             element.parentElement.querySelector(".fn__loading--top").classList.remove("fn__none");
             fetchPost("/api/asset/fullReindexAssetContent", {}, () => {
                 assetInputEvent(element, localData);

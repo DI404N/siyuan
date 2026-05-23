@@ -13,7 +13,6 @@ import {replaceFileName, validateName} from "../editor/rename";
 import {hideElements} from "../protyle/ui/hideElements";
 import {openMobileFileById} from "../mobile/editor";
 import {App} from "../index";
-import {escapeHtml} from "./escape";
 
 export const getNewFilePath = (useSavePath: boolean) => {
     let notebookId = "";
@@ -248,12 +247,15 @@ export const newFileBySelect = (protyle: IProtyle, selectText: string, nodeEleme
         path: hPath,
         notebook: targetNotebookId
     }, (idResponse) => {
-        const refText = escapeHtml(newFileName.substring(0, window.siyuan.config.editor.blockRefDynamicAnchorTextMaxLen));
+        const refText = newFileName.substring(0, window.siyuan.config.editor.blockRefDynamicAnchorTextMaxLen);
         if (idResponse.data && idResponse.data.length > 0) {
-            protyle.toolbar.setInlineMark(protyle, "block-ref", "range", {
+            const refElement = protyle.toolbar.setInlineMark(protyle, "block-ref", "range", {
                 type: "id",
                 color: `${idResponse.data[0]}${Constants.ZWSP}d${Constants.ZWSP}${refText}`
             });
+            if (refElement[0]) {
+                protyle.toolbar.range.selectNodeContents(refElement[0]);
+            }
         } else {
             fetchPost("/api/filetree/createDocWithMd", {
                 notebook: targetNotebookId,
@@ -261,10 +263,13 @@ export const newFileBySelect = (protyle: IProtyle, selectText: string, nodeEleme
                 parentID: protyle.notebookId === targetNotebookId ? protyle.block.rootID : "",
                 markdown: ""
             }, response => {
-                protyle.toolbar.setInlineMark(protyle, "block-ref", "range", {
+                const refElement = protyle.toolbar.setInlineMark(protyle, "block-ref", "range", {
                     type: "id",
                     color: `${response.data}${Constants.ZWSP}d${Constants.ZWSP}${refText}`
                 });
+                if (refElement[0]) {
+                    protyle.toolbar.range.selectNodeContents(refElement[0]);
+                }
             });
         }
         hideElements(["toolbar"], protyle);

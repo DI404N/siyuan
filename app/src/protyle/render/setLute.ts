@@ -24,7 +24,7 @@ export const setLute = (options: ILuteOptions) => {
     lute.SetKramdownIAL(true);
     lute.SetTag(true);
     lute.SetSuperBlock(true);
-    lute.SetMark(true);
+    lute.SetCallout(true);
     lute.SetInlineAsterisk(window.siyuan.config.editor.markdown.inlineAsterisk);
     lute.SetInlineUnderscore(window.siyuan.config.editor.markdown.inlineUnderscore);
     lute.SetSup(window.siyuan.config.editor.markdown.inlineSup);
@@ -47,5 +47,10 @@ export const setLute = (options: ILuteOptions) => {
         });
         lute.PutEmojis(emojis);
     }
+    lute.SetUnorderedListMarker("-");
+    lute.SetDataTask(true);
+    lute.SetExportNormalizeTaskListMarker(true);
+    lute.SetArbitraryTaskListItemMarker(true);
+
     return lute;
 };

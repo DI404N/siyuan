@@ -4,12 +4,11 @@ import {
     fixWndFlex1,
     getInstanceById,
     getWndByLayout,
-    JSONToCenter,
+    JSONToCenter, layoutToJSON,
     newModelByInitData,
     pdfIsLoading,
     saveLayout,
     setPanelFocus,
-    switchWnd
 } from "./util";
 import {Tab} from "./Tab";
 import {Model} from "./Model";
@@ -30,6 +29,7 @@ import {Search} from "../search";
 import {showMessage} from "../dialog/message";
 import {openFileById, updatePanelByEditor} from "../editor/util";
 import {scrollCenter} from "../util/highlightById";
+import {fetchPost} from "../util/fetch";
 import {getAllModels} from "./getAll";
 import {clearCounter} from "./status";
 import {saveScroll} from "../protyle/scroll/saveScroll";
@@ -51,6 +51,7 @@ import {setPadding} from "../protyle/ui/initUI";
 import {setPosition} from "../util/setPosition";
 import {clearOBG} from "./dock/util";
 import {recordBeforeResizeTop} from "../protyle/util/resize";
+import {setStorageVal} from "../protyle/util/compatibility";
 
 export class Wnd {
     private app: App;
@@ -170,7 +171,7 @@ export class Wnd {
             if (!window.siyuan.currentDragOverTabHeadersElement) {
                 window.siyuan.currentDragOverTabHeadersElement = it;
             } else {
-                if (!window.siyuan.currentDragOverTabHeadersElement.isSameNode(it)) {
+                if (window.siyuan.currentDragOverTabHeadersElement !== it) {
                     window.siyuan.currentDragOverTabHeadersElement.classList.remove("layout-tab-bars--drag");
                     window.siyuan.currentDragOverTabHeadersElement.querySelectorAll(".layout-tab-bar li[data-clone='true']").forEach(item => {
                         item.remove();
@@ -191,7 +192,7 @@ export class Wnd {
             let oldTabHeaderElement = window.siyuan.dragElement;
             let exitDrag = false;
             Array.from(it.firstElementChild.childNodes).find((item: HTMLElement) => {
-                if (item.style?.opacity === "0.1") {
+                if (item.style?.opacity === "0.38") {
                     oldTabHeaderElement = item;
                     exitDrag = true;
                     return true;
@@ -207,7 +208,7 @@ export class Wnd {
                 return;
             } else if (!exitDrag && !oldTabHeaderElement) { // 拖拽到新窗口
                 oldTabHeaderElement = document.createElement("li");
-                oldTabHeaderElement.style.opacity = "0.1";
+                oldTabHeaderElement.style.opacity = "0.38";
                 oldTabHeaderElement.innerHTML = '<svg class="svg"><use xlink:href="#iconFile"></use></svg>';
                 oldTabHeaderElement.setAttribute("data-clone", "true");
                 it.firstElementChild.append(oldTabHeaderElement);
@@ -220,7 +221,7 @@ export class Wnd {
                 return;
             }
             it.classList.remove("layout-tab-bars--drag");
-            if (!newTabHeaderElement.isSameNode(oldTabHeaderElement) &&
+            if (newTabHeaderElement !== oldTabHeaderElement &&
                 ((oldTabHeaderElement.classList.contains("item--pin") && newTabHeaderElement.classList.contains("item--pin")) ||
                     (!oldTabHeaderElement.classList.contains("item--pin") && !newTabHeaderElement.classList.contains("item--pin")))) {
                 const rect = newTabHeaderElement.getClientRects()[0];
@@ -231,17 +232,6 @@ export class Wnd {
                 }
             }
         });
-
-        this.headersElement.parentElement.addEventListener("dragend", () => {
-            document.querySelectorAll(".layout-tab-bars--drag").forEach(item => {
-                item.classList.remove("layout-tab-bars--drag");
-            });
-            // 窗口拖拽到新窗口时，不 drop 无法移除 clone 的元素
-            document.querySelectorAll(".layout-tab-bar li[data-clone='true']").forEach(item => {
-                item.remove();
-            });
-        });
-
         this.headersElement.parentElement.addEventListener("drop", function (event: DragEvent & {
             target: HTMLElement
         }) {
@@ -283,11 +273,13 @@ export class Wnd {
                 return;
             }
 
-            const nextTabHeaderElement = (Array.from(it.firstElementChild.childNodes).find((item: HTMLElement) => {
-                if (item.style?.opacity === "0.1") {
+            let nextTabHeaderElement: HTMLElement;
+            Array.from(it.firstElementChild.childNodes).find((item: HTMLElement) => {
+                if (item.style?.opacity === "0.38") {
+                    nextTabHeaderElement = item.nextElementSibling as HTMLElement;
                     return true;
                 }
-            }) as HTMLElement)?.nextElementSibling;
+            });
 
             if (!it.contains(oldTab.headElement)) {
                 // 从其他 Wnd 拖动过来
@@ -345,7 +337,6 @@ export class Wnd {
                 dragElement.removeAttribute("style");
             }
         });
-
         dragElement.addEventListener("dragover", (event: DragEvent & { layerX: number, layerY: number }) => {
             document.querySelectorAll(".layout-tab-bars--drag").forEach(item => {
                 item.classList.remove("layout-tab-bars--drag");
@@ -371,7 +362,12 @@ export class Wnd {
             /// #if !BROWSER
             if (!oldTab) { // 从主窗口拖拽到页签新窗口
                 JSONToCenter(app, tabData, this);
-                oldTab = this.children[this.children.length - 1];
+                this.children.find(item => {
+                    if (item.headElement.getAttribute("data-activetime") === tabData.activeTime) {
+                        oldTab = item;
+                        return true;
+                    }
+                });
                 ipcRenderer.send(Constants.SIYUAN_SEND_WINDOWS, {cmd: "closetab", data: tabData.id});
                 ipcRenderer.send(Constants.SIYUAN_CMD, "focus");
             }
@@ -385,26 +381,16 @@ export class Wnd {
                 // split
                 if (dragElement.style.height === "50%") {
                     // split to bottom
-                    const newWnd = targetWnd.split("tb");
+                    const newWnd = targetWnd.split("tb", dragElement.style.bottom !== "50%");
                     newWnd.headersElement.append(oldTab.headElement);
                     newWnd.headersElement.parentElement.classList.remove("fn__none");
                     newWnd.moveTab(oldTab);
-
-                    if (dragElement.style.bottom === "50%" && newWnd.element.previousElementSibling && targetWnd.element.parentElement) {
-                        // 交换位置
-                        switchWnd(newWnd, targetWnd);
-                    }
                 } else if (dragElement.style.width === "50%") {
                     // split to right
-                    const newWnd = targetWnd.split("lr");
+                    const newWnd = targetWnd.split("lr", dragElement.style.right !== "50%");
                     newWnd.headersElement.append(oldTab.headElement);
                     newWnd.headersElement.parentElement.classList.remove("fn__none");
                     newWnd.moveTab(oldTab);
-
-                    if (dragElement.style.right === "50%" && newWnd.element.previousElementSibling && targetWnd.element.parentElement) {
-                        // 交换位置
-                        switchWnd(newWnd, targetWnd);
-                    }
                 }
                 resizeTabs();
                 /// #if !BROWSER
@@ -418,6 +404,7 @@ export class Wnd {
                 return;
             }
             if (targetWnd) {
+                recordBeforeResizeTop();
                 targetWnd.headersElement.append(oldTab.headElement);
                 targetWnd.headersElement.parentElement.classList.remove("fn__none");
                 targetWnd.moveTab(oldTab);
@@ -492,6 +479,10 @@ export class Wnd {
                             isInitActive = true;
                         } else {
                             item.headElement.setAttribute("data-activetime", (new Date()).getTime().toString());
+                            // 更新文档浏览时间
+                            if (item.model instanceof Editor) {
+                                fetchPost("/api/storage/updateRecentDocViewTime", {rootID: item.model.editor.protyle.block.rootID});
+                            }
                         }
                     }
                     item.panelElement.classList.remove("fn__none");
@@ -548,7 +539,7 @@ export class Wnd {
                         range.collapse();
                         currentTab.model.editor.protyle.toolbar.range = range;
                     }
-                    scrollCenter(currentTab.model.editor.protyle, nodeElement, true);
+                    scrollCenter(currentTab.model.editor.protyle, nodeElement, "start");
                 } else {
                     openFileById({
                         app: this.app,
@@ -568,7 +559,7 @@ export class Wnd {
                     resize,
                 });
             }
-            if (window.siyuan.editorIsFullscreen) {
+            if (window.siyuan.editorIsFullscreen && !currentTab.model.editor.protyle.element.className.includes("fullscreen")) {
                 fullscreen(currentTab.model.editor.protyle.element);
                 setPadding(currentTab.model.editor.protyle);
             }
@@ -637,6 +628,7 @@ export class Wnd {
         if (tab.callback) {
             tab.callback(tab);
         }
+
         // 移除 centerLayout 中的 empty
         if (this.parent.type === "center" && this.children.length === 2 && !this.children[0].headElement) {
             this.removeTab(this.children[0].id);
@@ -659,7 +651,7 @@ export class Wnd {
 
     private renderTabList(target: HTMLElement) {
         if (!window.siyuan.menus.menu.element.classList.contains("fn__none") &&
-            window.siyuan.menus.menu.element.getAttribute("data-name") === "tabList") {
+            window.siyuan.menus.menu.element.getAttribute("data-name") === Constants.MENU_TAB_LIST) {
             window.siyuan.menus.menu.remove();
             return;
         }
@@ -708,7 +700,7 @@ export class Wnd {
                 current: item.classList.contains("item--focus")
             }).element);
         });
-        window.siyuan.menus.menu.element.setAttribute("data-name", "tabList");
+        window.siyuan.menus.menu.element.setAttribute("data-name", Constants.MENU_TAB_LIST);
         const rect = target.getBoundingClientRect();
         window.siyuan.menus.menu.popup({
             x: rect.left + rect.width,
@@ -722,6 +714,9 @@ export class Wnd {
         let openTime: string;
         let removeCount = 0;
         this.children.forEach((item, index) => {
+            if (!item.headElement) {
+                return;
+            }
             if (item.headElement.classList.contains("item--pin") || item.headElement.classList.contains("item--focus")) {
                 return;
             }
@@ -774,15 +769,28 @@ export class Wnd {
         model.send("closews", {});
     }
 
-    private removeTabAction = (id: string, closeAll = false, animate = true, isSaveLayout = true) => {
+    private removeTabAction = (id: string, isBatchClose = false, animate = true, isSaveLayout = true) => {
         clearCounter();
         this.children.find((item, index) => {
             if (item.id === id) {
+                if (window.siyuan.storage[Constants.LOCAL_CLOSED_TABS].length > Constants.SIZE_UNDO) {
+                    window.siyuan.storage[Constants.LOCAL_CLOSED_TABS].pop();
+                }
+                if (item.headElement) {
+                    const tabJSON = {};
+                    layoutToJSON(item, tabJSON);
+                    window.siyuan.storage[Constants.LOCAL_CLOSED_TABS].push(tabJSON);
+                    setStorageVal(Constants.LOCAL_CLOSED_TABS, window.siyuan.storage[Constants.LOCAL_CLOSED_TABS]);
+                }
                 if (item.model instanceof Custom && item.model.beforeDestroy) {
                     item.model.beforeDestroy();
                 }
                 if (item.model instanceof Editor) {
                     saveScroll(item.model.editor.protyle);
+                    // 更新文档关闭时间（批量关闭页签时由 closeTabByType 批量处理，这里不单独调用）
+                    if (!isBatchClose) {
+                        fetchPost("/api/storage/updateRecentDocCloseTime", {rootID: item.model.editor.protyle.block.rootID});
+                    }
                 }
                 if (this.children.length === 1) {
                     this.destroyModel(this.children[0].model);
@@ -818,7 +826,7 @@ export class Wnd {
                     if (item.headElement.classList.contains("item--focus")) {
                         let latestHeadElement: HTMLElement;
                         Array.from(item.headElement.parentElement.children).forEach((headItem: HTMLElement) => {
-                            if (!headItem.isSameNode(item.headElement) &&
+                            if (headItem !== item.headElement &&
                                 headItem.style.maxWidth !== "0px"   // 不对比已移除但还在动画效果中的元素 https://github.com/siyuan-note/siyuan/issues/7878
                             ) {
                                 if (!latestHeadElement) {
@@ -828,7 +836,7 @@ export class Wnd {
                                 }
                             }
                         });
-                        if (latestHeadElement && !closeAll) {
+                        if (latestHeadElement && !isBatchClose) {
                             this.switchTab(latestHeadElement, true, true, false, false);
                             this.showHeading();
                         }
@@ -862,7 +870,7 @@ export class Wnd {
                 const wnd = new Wnd(this.app);
                 window.siyuan.layout.centerLayout.addWnd(wnd);
                 wnd.addTab(newCenterEmptyTab(this.app), false, false);
-                setTitle(window.siyuan.languages.siyuanNote);
+                setTitle("", true);
             }
         }
         if (isSaveLayout) {
@@ -876,7 +884,7 @@ export class Wnd {
         /// #endif
     };
 
-    public removeTab(id: string, closeAll = false, animate = true, isSaveLayout = true) {
+    public removeTab(id: string, isBatchClose = false, animate = true, isSaveLayout = true) {
         for (let index = 0; index < this.children.length; index++) {
             const item = this.children[index];
             if (item.id === id) {
@@ -885,9 +893,9 @@ export class Wnd {
                         showMessage(window.siyuan.languages.uploading);
                         return;
                     }
-                    this.removeTabAction(id, closeAll, animate, isSaveLayout);
+                    this.removeTabAction(id, isBatchClose, animate, isSaveLayout);
                 } else {
-                    this.removeTabAction(id, closeAll, animate, isSaveLayout);
+                    this.removeTabAction(id, isBatchClose, animate, isSaveLayout);
                 }
                 return;
             }
@@ -971,25 +979,27 @@ export class Wnd {
         /// #endif
     }
 
-    public split(direction: Config.TUILayoutDirection) {
+    public split(direction: Config.TUILayoutDirection, after = true) {
         if (this.children.length === 1 && !this.children[0].headElement) {
             // 场景：没有打开的文档，点击标签面板打开
             return this;
         }
+        recordBeforeResizeTop();
         const wnd = new Wnd(this.app, direction);
         if (direction === this.parent.direction) {
-            this.parent.addWnd(wnd, this.id);
+            this.parent.addWnd(wnd, this.id, after);
         } else if (this.parent.children.length === 1) {
             // layout 仅含一个时，只需更新 direction
             this.parent.direction = direction;
             if (direction === "tb") {
                 this.parent.element.classList.add("fn__flex-column");
+                this.parent.element.style.minHeight = "8px";
                 this.parent.element.classList.remove("fn__flex");
             } else {
                 this.parent.element.classList.remove("fn__flex-column");
                 this.parent.element.classList.add("fn__flex");
             }
-            this.parent.addWnd(wnd, this.id);
+            this.parent.addWnd(wnd, this.id, after);
         } else {
             this.parent.children.find((item, index) => {
                 if (item.id === this.id) {
@@ -997,14 +1007,23 @@ export class Wnd {
                         resize: item.resize,
                         direction,
                     });
-                    this.parent.addLayout(layout, item.id);
-                    const movedWnd = this.parent.children.splice(index, 1)[0];
+                    this.parent.addLayout(layout, item.id, after);
+                    const movedWnd = this.parent.children.splice(after ? index : index + 1, 1)[0];
                     if (movedWnd.resize) {
-                        movedWnd.element.previousElementSibling.remove();
+                        if (movedWnd.element.previousElementSibling && movedWnd.element.previousElementSibling.classList.contains("layout__resize")) {
+                            movedWnd.element.previousElementSibling.remove();
+                        } else if (movedWnd.element.nextElementSibling && movedWnd.element.nextElementSibling.classList.contains("layout__resize")) {
+                            movedWnd.element.nextElementSibling.remove();
+                        }
                         movedWnd.resize = undefined;
                     }
-                    layout.addWnd.call(layout, movedWnd);
-                    layout.addWnd.call(layout, wnd);
+                    if (after) {
+                        layout.addWnd.call(layout, movedWnd);
+                        layout.addWnd.call(layout, wnd);
+                    } else {
+                        layout.addWnd.call(layout, wnd);
+                        layout.addWnd.call(layout, movedWnd);
+                    }
 
                     if (direction === "tb" && movedWnd.element.style.width) {
                         layout.element.style.width = movedWnd.element.style.width;

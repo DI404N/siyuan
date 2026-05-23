@@ -18,7 +18,6 @@ package model
 
 import (
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,7 +29,9 @@ import (
 	"github.com/88250/lute/parse"
 	"github.com/88250/lute/render"
 	"github.com/emirpasic/gods/sets/hashset"
+	"github.com/siyuan-note/logging"
 	"github.com/siyuan-note/siyuan/kernel/av"
+	"github.com/siyuan-note/siyuan/kernel/conf"
 	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/sql"
 	"github.com/siyuan-note/siyuan/kernel/task"
@@ -38,26 +39,88 @@ import (
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
-func refreshDocInfo(tree *parse.Tree, size uint64) {
+func PushReloadSnippet(snippet *conf.Snpt) {
+	util.BroadcastByType("main", "setSnippet", 0, "", snippet)
+}
+
+func PushReloadPlugin(uninstallPluginNameSet, unloadPluginNameSet, reloadPluginSet, dataChangePluginSet *hashset.Set, excludeApp string) {
+	// 按优先级从高到低排列，同一插件只保留在优先级最高的集合中
+	orderedSets := []*hashset.Set{uninstallPluginNameSet, unloadPluginNameSet, reloadPluginSet, dataChangePluginSet}
+	slices := make([][]string, len(orderedSets))
+	// 按顺序遍历所有集合
+	for i, set := range orderedSets {
+		if nil != set {
+			// 遍历当前集合的所有插件名称
+			for _, n := range set.Values() {
+				name := n.(string)
+				// 将该插件从所有后续集合中移除
+				for _, lowerSet := range orderedSets[i+1:] {
+					if nil != lowerSet {
+						lowerSet.Remove(name)
+					}
+				}
+			}
+		}
+
+		// 将当前集合转换为字符串切片
+		if nil == set {
+			slices[i] = []string{}
+		} else {
+			strs := make([]string, 0, set.Size())
+			for _, n := range set.Values() {
+				strs = append(strs, n.(string))
+			}
+			slices[i] = strs
+		}
+	}
+
+	logging.LogInfof("reload plugins, uninstalls=%v, unloads=%v, reloads=%v, dataChanges=%v", slices[0], slices[1], slices[2], slices[3])
+	payload := map[string]any{
+		"uninstallPlugins":  slices[0], // 插件卸载
+		"unloadPlugins":     slices[1], // 插件禁用
+		"reloadPlugins":     slices[2], // 插件启用，或插件代码变更
+		"dataChangePlugins": slices[3], // 插件存储数据变更
+	}
+
+	if "" == excludeApp {
+		util.BroadcastByType("main", "reloadPlugin", 0, "", payload)
+		return
+	}
+	util.BroadcastByTypeAndExcludeApp(excludeApp, "main", "reloadPlugin", 0, "", payload)
+}
+
+func refreshDocInfo(tree *parse.Tree) {
+	if nil == tree {
+		return
+	}
+
+	refreshDocInfoWithSize(tree, filesys.TreeSize(tree))
+}
+
+func refreshDocInfoWithSize(tree *parse.Tree, size uint64) {
+	if nil == tree {
+		return
+	}
+
 	refreshDocInfo0(tree, size)
-	refreshParentDocInfo(tree)
+	go func() {
+		time.Sleep(128 * time.Millisecond)
+		refreshParentDocInfo(tree)
+	}()
 }
 
 func refreshParentDocInfo(tree *parse.Tree) {
+	if nil == tree {
+		return
+	}
+
+	parentTree := loadParentTree(tree)
+	if nil == parentTree {
+		return
+	}
+
 	luteEngine := lute.New()
-	boxDir := filepath.Join(util.DataDir, tree.Box)
-	parentDir := path.Dir(tree.Path)
-	if parentDir == boxDir || parentDir == "/" {
-		return
-	}
-
-	parentPath := parentDir + ".sy"
-	parentTree, err := filesys.LoadTree(tree.Box, parentPath, luteEngine)
-	if err != nil {
-		return
-	}
-
-	renderer := render.NewJSONRenderer(parentTree, luteEngine.RenderOptions)
+	renderer := render.NewJSONRenderer(parentTree, luteEngine.RenderOptions, luteEngine.ParseOptions)
 	data := renderer.Render()
 	refreshDocInfo0(parentTree, uint64(len(data)))
 }
@@ -72,20 +135,25 @@ func refreshDocInfo0(tree *parse.Tree, size uint64) {
 	}
 
 	subFileCount := 0
-	subFiles, err := os.ReadDir(filepath.Join(util.DataDir, tree.Box, strings.TrimSuffix(tree.Path, ".sy")))
-	if err == nil {
-		for _, subFile := range subFiles {
-			if "true" == tree.Root.IALAttr("custom-hidden") {
-				continue
-			}
+	if "true" != tree.Root.IALAttr(DocHiddenAttr) {
+		subDir := filepath.Join(util.DataDir, tree.Box, strings.TrimSuffix(tree.Path, ".sy"))
+		subFiles, err := os.ReadDir(subDir)
+		if err == nil {
+			for _, subFile := range subFiles {
+				if !strings.HasSuffix(subFile.Name(), ".sy") {
+					continue
+				}
 
-			if strings.HasSuffix(subFile.Name(), ".sy") {
+				subDocIAL := filesys.DocIAL(filepath.Join(subDir, subFile.Name()))
+				if "true" == subDocIAL[DocHiddenAttr] {
+					continue
+				}
 				subFileCount++
 			}
 		}
 	}
 
-	docInfo := map[string]interface{}{
+	docInfo := map[string]any{
 		"rootID":       tree.ID,
 		"name":         tree.Root.IALAttr("title"),
 		"alias":        tree.Root.IALAttr("alias"),
@@ -104,7 +172,15 @@ func refreshDocInfo0(tree *parse.Tree, size uint64) {
 	task.AppendAsyncTaskWithDelay(task.ReloadProtyle, 500*time.Millisecond, util.PushReloadDocInfo, docInfo)
 }
 
-func refreshProtyle(rootID string) {
+func ReloadFiletree() {
+	task.AppendAsyncTaskWithDelay(task.ReloadFiletree, 200*time.Millisecond, util.PushReloadFiletree)
+}
+
+func ReloadTag() {
+	task.AppendAsyncTaskWithDelay(task.ReloadTag, 200*time.Millisecond, util.PushReloadTag)
+}
+
+func ReloadProtyle(rootID string) {
 	// 刷新关联的引用
 	defTree, _ := LoadTreeByBlockID(rootID)
 	if nil != defTree {
@@ -143,7 +219,7 @@ func refreshProtyle(rootID string) {
 }
 
 // refreshRefCount 用于刷新定义块处的引用计数。
-func refreshRefCount(rootID, blockID string) {
+func refreshRefCount(blockID string) {
 	sql.FlushQueue()
 
 	bt := treenode.GetBlockTree(blockID)
@@ -169,7 +245,7 @@ func refreshRefCount(rootID, blockID string) {
 		defIDs = append(defIDs, bt.ID)
 	}
 
-	util.PushSetDefRefCount(rootID, blockID, defIDs, refCount, rootRefCount)
+	util.PushSetDefRefCount(bt.RootID, blockID, defIDs, refCount, rootRefCount)
 }
 
 // refreshDynamicRefText 用于刷新块引用的动态锚文本。
@@ -182,12 +258,37 @@ func refreshDynamicRefText(updatedDefNode *ast.Node, updatedTree *parse.Tree) {
 
 // refreshDynamicRefTexts 用于批量刷新块引用的动态锚文本。
 // 该实现依赖了数据库缓存，导致外部调用时可能需要阻塞等待数据库写入后才能获取到 refs
-func refreshDynamicRefTexts(updatedDefNodes map[string]*ast.Node, updatedTrees map[string]*parse.Tree) {
+func refreshDynamicRefTexts(updatedDefNodes map[string]*ast.Node, updatedTrees map[string]*parse.Tree) (changedRootIDs []string) {
+	for t := range updatedTrees {
+		changedRootIDs = append(changedRootIDs, t)
+	}
+
+	for i := 0; i < 7; i++ {
+		updatedRefNodes, updatedRefTrees := refreshDynamicRefTexts0(updatedDefNodes, updatedTrees)
+		if 1 > len(updatedRefNodes) {
+			break
+		}
+		updatedDefNodes, updatedTrees = updatedRefNodes, updatedRefTrees
+
+		for t := range updatedTrees {
+			changedRootIDs = append(changedRootIDs, t)
+		}
+	}
+
+	changedRootIDs = gulu.Str.RemoveDuplicatedElem(changedRootIDs)
+	return
+}
+
+func refreshDynamicRefTexts0(updatedDefNodes map[string]*ast.Node, updatedTrees map[string]*parse.Tree) (updatedRefNodes map[string]*ast.Node, updatedRefTrees map[string]*parse.Tree) {
+	updatedRefNodes = map[string]*ast.Node{}
+	updatedRefTrees = map[string]*parse.Tree{}
+
 	// 1. 更新引用的动态锚文本
 	treeRefNodeIDs := map[string]*hashset.Set{}
-	var changedParentNodes []*ast.Node
+	var changedNodes []*ast.Node
+	var refs []*sql.Ref
 	for _, updateNode := range updatedDefNodes {
-		refs, parentNodes := getRefsCacheByDefNode(updateNode)
+		refs, changedNodes = getRefsCacheByDefNode(updateNode)
 		for _, ref := range refs {
 			if refIDs, ok := treeRefNodeIDs[ref.RootID]; !ok {
 				refIDs = hashset.New()
@@ -197,14 +298,9 @@ func refreshDynamicRefTexts(updatedDefNodes map[string]*ast.Node, updatedTrees m
 				refIDs.Add(ref.BlockID)
 			}
 		}
-		if 0 < len(parentNodes) {
-			changedParentNodes = append(changedParentNodes, parentNodes...)
-		}
 	}
-	if 0 < len(changedParentNodes) {
-		for _, parent := range changedParentNodes {
-			updatedDefNodes[parent.ID] = parent
-		}
+	for _, n := range changedNodes {
+		updatedDefNodes[n.ID] = n
 	}
 
 	changedRefTree := map[string]*parse.Tree{}
@@ -229,11 +325,14 @@ func refreshDynamicRefTexts(updatedDefNodes map[string]*ast.Node, updatedTrees m
 				changed, changedDefNodes := updateRefText(n, updatedDefNodes)
 				if !refTreeChanged && changed {
 					refTreeChanged = true
+					updatedRefNodes[n.ID] = n
+					updatedRefTrees[refTreeID] = refTree
 				}
 
 				// 推送动态锚文本节点刷新
 				for _, defNode := range changedDefNodes {
-					if "ref-d" == defNode.refType {
+					switch defNode.refType {
+					case "ref-d":
 						task.AppendAsyncTaskWithDelay(task.SetRefDynamicText, 200*time.Millisecond, util.PushSetRefDynamicText, refTreeID, n.ID, defNode.id, defNode.refText)
 					}
 				}
@@ -255,6 +354,7 @@ func refreshDynamicRefTexts(updatedDefNodes map[string]*ast.Node, updatedTrees m
 	for _, tree := range changedRefTree {
 		indexWriteTreeUpsertQueue(tree)
 	}
+	return
 }
 
 func updateAttributeViewBlockText(updatedDefNodes map[string]*ast.Node) {
@@ -289,7 +389,7 @@ func updateAttributeViewBlockText(updatedDefNodes map[string]*ast.Node) {
 
 			for _, blockValue := range blockValues.Values {
 				if blockValue.Block.ID == updatedDefNode.ID {
-					newIcon, newContent := getNodeAvBlockText(updatedDefNode)
+					newIcon, newContent := getNodeAvBlockText(updatedDefNode, avID)
 					if newIcon != blockValue.Block.Icon {
 						blockValue.Block.Icon = newIcon
 						changedAv = true
@@ -304,6 +404,8 @@ func updateAttributeViewBlockText(updatedDefNodes map[string]*ast.Node) {
 			if changedAv {
 				av.SaveAttributeView(attrView)
 				ReloadAttrView(avID)
+
+				refreshRelatedSrcAvs(avID, nil)
 			}
 		}
 	}
@@ -315,5 +417,5 @@ func ReloadAttrView(avID string) {
 }
 
 func pushReloadAttrView(avID string) {
-	util.BroadcastByType("protyle", "refreshAttributeView", 0, "", map[string]interface{}{"id": avID})
+	util.BroadcastByType("protyle", "refreshAttributeView", 0, "", map[string]any{"id": avID})
 }
